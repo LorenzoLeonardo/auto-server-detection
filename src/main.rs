@@ -44,8 +44,7 @@ async fn main() -> Result<(), Error> {
             header::CONTENT_TYPE,
             header::HeaderValue::from_static("application/json"),
         )
-        .body(Some(serde_json::to_vec(&body).unwrap()))
-        .unwrap();
+        .body(Some(serde_json::to_vec(&body)?))?;
 
     let response = HttpClient::new(collector)
         .request(request)?
