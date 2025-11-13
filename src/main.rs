@@ -5,6 +5,7 @@ use async_curl::CurlActor;
 use curl_http_client::*;
 use futures::stream::{FuturesUnordered, StreamExt};
 use http::{Method, Request};
+use local_ip_address::local_ip;
 use tokio::net::TcpStream;
 use tokio::time;
 
@@ -73,40 +74,50 @@ async fn main() {
 
     // 🔍 Try to guess your subnet automatically
     // For now, default to common private ranges
-    let subnets = ["192.168.0."];
+    let local_ip = local_ip().expect("Failed to get local IP");
+    println!("Local IP detected: {}", local_ip);
+
+    let subnet = match local_ip {
+        IpAddr::V4(ipv4) => {
+            let octets = ipv4.octets();
+            format!("{}.{}.{}.", octets[0], octets[1], octets[2])
+        }
+        IpAddr::V6(_) => {
+            eprintln!("IPv6 not supported yet.");
+            return;
+        }
+    };
 
     let actor = CurlActor::new();
 
-    for subnet in subnets {
+    println!(
+        "🔎 Scanning subnet {}0/24 for HTTPS servers on port {}...",
+        subnet, port
+    );
+
+    let mut tasks = FuturesUnordered::new();
+    for i in 1..=254 {
+        let ip: IpAddr = format!("{}{}", subnet, i).parse().unwrap();
+        let c = actor.clone();
+        tasks.push(tokio::spawn(
+            async move { check_http_server(ip, port, c).await },
+        ));
+    }
+
+    let mut found = false;
+    while let Some(res) = tasks.next().await {
+        if let Ok(Ok(Some(ip))) = res {
+            println!("🎯 Active HTTP server detected at {}", ip);
+            found = true;
+        }
+    }
+
+    if found {
         println!(
-            "🔎 Scanning subnet {}0/24 for HTTPS servers on port {}...",
-            subnet, port
+            "✅ Finished scanning {}0/24 — found active server(s).",
+            subnet
         );
-
-        let mut tasks = FuturesUnordered::new();
-        for i in 1..=254 {
-            let ip: IpAddr = format!("{}{}", subnet, i).parse().unwrap();
-            let c = actor.clone();
-            tasks.push(tokio::spawn(
-                async move { check_http_server(ip, port, c).await },
-            ));
-        }
-
-        let mut found = false;
-        while let Some(res) = tasks.next().await {
-            if let Ok(Ok(Some(ip))) = res {
-                println!("🎯 Active HTTP server detected at {}", ip);
-                found = true;
-            }
-        }
-
-        if found {
-            println!(
-                "✅ Finished scanning {}0/24 — found active server(s).",
-                subnet
-            );
-        } else {
-            println!("❌ No HTTP servers found in {}0/24.", subnet);
-        }
+    } else {
+        println!("❌ No HTTP servers found in {}0/24.", subnet);
     }
 }
