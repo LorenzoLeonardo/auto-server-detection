@@ -147,7 +147,10 @@ impl SubnetScannerBuilder {
         Ok(())
     }
 
-    pub async fn scan(self) -> Result<(Ipv4Addr, u16), Error> {
+    pub async fn scan(
+        self,
+        curl_actor: CurlActor<Collector>,
+    ) -> Result<(Ipv4Addr, u16, Ipv4Addr), Error> {
         let mut builder = self;
         builder
             .auto_detect_network()
@@ -167,15 +170,12 @@ impl SubnetScannerBuilder {
             "🔎 Scanning subnet {}/{} for HTTPS servers on port {}...",
             network, prefix_len, builder.port
         );
-
-        let actor = CurlActor::new();
-
         let mut tasks = FuturesUnordered::new();
         let timeout = builder.timeout;
         let port = builder.port;
 
         for ip in ips {
-            let c = actor.clone();
+            let c = curl_actor.clone();
             tasks.push(tokio::spawn(async move {
                 check_http_server(ip, port, c, timeout).await
             }));
@@ -184,7 +184,7 @@ impl SubnetScannerBuilder {
         while let Some(res) = tasks.next().await {
             if let Ok(Ok(Some(ip))) = res {
                 println!("🎯 Active HTTP server detected at {}", ip);
-                return Ok((ip, port));
+                return Ok((ip, port, local_ip));
             }
         }
         Err(Error::Other(format!(
