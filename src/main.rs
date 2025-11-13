@@ -1,10 +1,11 @@
-use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::time::Duration;
 
 use async_curl::CurlActor;
 use curl_http_client::*;
 use futures::stream::{FuturesUnordered, StreamExt};
 use http::{Method, Request};
+use if_addrs::{IfAddr, get_if_addrs};
 use local_ip_address::local_ip;
 use tokio::net::TcpStream;
 use tokio::time;
@@ -31,10 +32,10 @@ impl From<http::Error> for Error {
 
 /// Try to connect and confirm an HTTP response
 async fn check_http_server(
-    ip: IpAddr,
+    ip: Ipv4Addr,
     port: u16,
     actor: CurlActor<Collector>,
-) -> Result<Option<IpAddr>, Error> {
+) -> Result<Option<Ipv4Addr>, Error> {
     let addr = format!("{}:{}", ip, port);
     let timeout = Duration::from_secs(1);
     // Quick TCP check first
@@ -68,6 +69,38 @@ async fn check_http_server(
     Ok(Some(ip))
 }
 
+// Helper: convert netmask (e.g. 255.255.255.0) to prefix length (e.g. 24)
+fn netmask_to_prefixlen(netmask: Ipv4Addr) -> u32 {
+    let octets = netmask.octets();
+    let mut bits = 0;
+    for byte in octets {
+        bits += byte.count_ones();
+    }
+    bits
+}
+
+// Helper: calculate network address (IP & mask)
+fn network_address(ip: Ipv4Addr, netmask: Ipv4Addr) -> Ipv4Addr {
+    let ip_octets = ip.octets();
+    let mask_octets = netmask.octets();
+    Ipv4Addr::new(
+        ip_octets[0] & mask_octets[0],
+        ip_octets[1] & mask_octets[1],
+        ip_octets[2] & mask_octets[2],
+        ip_octets[3] & mask_octets[3],
+    )
+}
+
+// Helper: generate IP range iterator over subnet
+fn ip_range(network: Ipv4Addr, prefix_len: u32) -> impl Iterator<Item = Ipv4Addr> {
+    let host_bits = 32 - prefix_len;
+    let num_hosts = 2u32.pow(host_bits) - 2; // exclude network & broadcast
+
+    let base = u32::from(network);
+
+    (1..=num_hosts).map(move |i| Ipv4Addr::from(base + i))
+}
+
 #[tokio::main]
 async fn main() {
     let port = 5247;
@@ -77,27 +110,35 @@ async fn main() {
     let local_ip = local_ip().expect("Failed to get local IP");
     println!("Local IP detected: {}", local_ip);
 
-    let subnet = match local_ip {
-        IpAddr::V4(ipv4) => {
-            let octets = ipv4.octets();
-            format!("{}.{}.{}.", octets[0], octets[1], octets[2])
-        }
-        IpAddr::V6(_) => {
-            eprintln!("IPv6 not supported yet.");
-            return;
-        }
+    let iface = get_if_addrs()
+        .expect("Failed to get interfaces")
+        .into_iter()
+        .find(|iface| iface.addr.ip() == local_ip)
+        .expect("No IPv4 interface found");
+
+    let netmask = match iface.addr {
+        IfAddr::V4(mask) => mask,
+        _ => panic!("No IPv4 netmask found"),
     };
+    let local_ip = netmask.ip;
+    let netmask = netmask.netmask;
+
+    println!("Local IP : {local_ip} Mask: {netmask}");
+
+    let prefix_len = netmask_to_prefixlen(netmask);
+    println!("Prefix length: /{}", prefix_len);
+
+    let network = network_address(local_ip, netmask);
+    println!("Network address: {}", network);
+
+    let ips: Vec<Ipv4Addr> = ip_range(network, prefix_len).collect();
 
     let actor = CurlActor::new();
 
-    println!(
-        "🔎 Scanning subnet {}0/24 for HTTPS servers on port {}...",
-        subnet, port
-    );
+    println!("🔎 Scanning subnet {network}/{prefix_len} for HTTPS servers on port {port}...");
 
     let mut tasks = FuturesUnordered::new();
-    for i in 1..=254 {
-        let ip: IpAddr = format!("{}{}", subnet, i).parse().unwrap();
+    for ip in ips {
         let c = actor.clone();
         tasks.push(tokio::spawn(
             async move { check_http_server(ip, port, c).await },
@@ -113,11 +154,8 @@ async fn main() {
     }
 
     if found {
-        println!(
-            "✅ Finished scanning {}0/24 — found active server(s).",
-            subnet
-        );
+        println!("✅ Finished scanning {network}/{prefix_len} — found active server(s).",);
     } else {
-        println!("❌ No HTTP servers found in {}0/24.", subnet);
+        println!("❌ No HTTP servers found in {network}/{prefix_len}.");
     }
 }
