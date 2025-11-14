@@ -5,7 +5,7 @@ use curl_http_client::{Collector, HttpClient};
 use http::{Method, Request, StatusCode, header};
 use serde::Serialize;
 
-use crate::scanner::Error;
+use crate::error::Error;
 
 pub(crate) async fn register_device(
     curl: CurlActor<Collector>,

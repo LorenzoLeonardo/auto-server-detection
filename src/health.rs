@@ -5,7 +5,7 @@ use async_curl::CurlActor;
 use curl_http_client::{Collector, HttpClient};
 use http::{Method, Request, StatusCode};
 
-use crate::scanner::Error;
+use crate::error::Error;
 
 pub(crate) async fn health_check(
     curl: &CurlActor<Collector>,

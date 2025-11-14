@@ -1,3 +1,4 @@
+mod error;
 mod health;
 mod logger;
 mod manager;
@@ -9,7 +10,7 @@ use anyhow::Result;
 use async_curl::CurlActor;
 use curl_http_client::Collector;
 
-use crate::{manager::Manager, scanner::Error, webserver::WebServerBuilder};
+use crate::{error::Error, manager::Manager, webserver::WebServerBuilder};
 
 const BIND_ADDR: &str = "0.0.0.0:5248";
 

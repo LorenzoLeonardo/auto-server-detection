@@ -4,9 +4,9 @@ use async_curl::CurlActor;
 use curl_http_client::Collector;
 use tokio::sync::mpsc;
 
+use crate::error::Error;
 use crate::health;
 use crate::register;
-use crate::scanner::Error;
 use crate::scanner::SubnetScannerBuilder;
 
 #[derive(Debug)]
