@@ -4,7 +4,7 @@ use async_curl::CurlActor;
 use curl_http_client::Collector;
 use tokio::sync::mpsc;
 
-use crate::health_check;
+use crate::health;
 use crate::register;
 use crate::scanner::Error;
 use crate::scanner::SubnetScannerBuilder;
@@ -136,7 +136,7 @@ impl Manager {
 
         tokio::spawn(async move {
             loop {
-                match health_check(&curl, server_ip, port).await {
+                match health::health_check(&curl, server_ip, port).await {
                     Ok(_) => {
                         let _ = tx.send(ManagerMsg::ServerAlive).await;
                     }
