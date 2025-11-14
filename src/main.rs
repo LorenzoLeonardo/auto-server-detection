@@ -1,4 +1,4 @@
-use std::{process::Command, time::Duration};
+use std::{net::Ipv4Addr, process::Command, time::Duration};
 
 use anyhow::Result;
 use async_curl::CurlActor;
@@ -187,34 +187,12 @@ fn setup_logger() {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Error> {
-    setup_logger();
-    let web_handler = WebServerBuilder::new()
-        .bind_addr(BIND_ADDR)
-        .spawn()
-        .await
-        .unwrap();
-
-    let curl = CurlActor::new();
-    let (server_ip, port, device_ip) = loop {
-        match SubnetScannerBuilder::new()
-            .port(5247)
-            .timeout(Duration::from_secs(1))
-            .scan(curl.clone())
-            .await
-        {
-            Ok((ip, port, device_ip)) => {
-                println!("Success! Found server at {}:{}", ip, port);
-                break (ip, port, device_ip);
-            }
-            Err(e) => {
-                eprintln!("Scan failed: {e}. Retrying in 5 second...");
-                tokio::time::sleep(Duration::from_secs(5)).await;
-            }
-        }
-    };
-
+async fn register_device(
+    curl: CurlActor<Collector>,
+    server_ip: Ipv4Addr,
+    port: u16,
+    device_ip: Ipv4Addr,
+) -> Result<(), Error> {
     let url = format!("https://{server_ip}:{port}/register");
     println!("{url}");
 
@@ -247,6 +225,41 @@ async fn main() -> Result<(), Error> {
 
     println!("{:#?}", response.headers());
     println!("{response:#?}");
+    Ok(())
+}
+
+async fn scan_subnet(curl: CurlActor<Collector>) -> (Ipv4Addr, u16, Ipv4Addr) {
+    loop {
+        match SubnetScannerBuilder::new()
+            .port(5247)
+            .timeout(Duration::from_secs(1))
+            .scan(curl.clone())
+            .await
+        {
+            Ok((ip, port, device_ip)) => {
+                println!("Success! Found server at {}:{}", ip, port);
+                break (ip, port, device_ip);
+            }
+            Err(e) => {
+                eprintln!("Scan failed: {e}. Retrying in 5 second...");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        }
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Error> {
+    setup_logger();
+    let web_handler = WebServerBuilder::new()
+        .bind_addr(BIND_ADDR)
+        .spawn()
+        .await
+        .unwrap();
+
+    let curl: CurlActor<Collector> = CurlActor::new();
+    let (server_ip, port, device_ip) = scan_subnet(curl.clone()).await;
+    register_device(curl, server_ip, port, device_ip).await?;
 
     tokio::signal::ctrl_c().await.unwrap();
     log::info!("Ctrl+C received, shutting down.");
