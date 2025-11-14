@@ -1,20 +1,18 @@
+mod logger;
+mod scanner;
+
 use std::{net::Ipv4Addr, process::Command, time::Duration};
 
 use anyhow::Result;
 use async_curl::CurlActor;
 use axum::{Json, Router, body::Body, routing::post};
-use chrono::Local;
 use curl_http_client::{Collector, HttpClient};
-use fern::Dispatch;
 use http::{Method, Request, header};
-use log::LevelFilter;
 use serde::Serialize;
 use serde_json::json;
 use tokio::{sync::watch, task::JoinHandle};
 
 use crate::scanner::{Error, SubnetScannerBuilder};
-
-mod scanner;
 
 const BIND_ADDR: &str = "0.0.0.0:5248";
 
@@ -142,51 +140,6 @@ impl WebServerStopper {
     }
 }
 
-fn logging_level() -> LevelFilter {
-    match std::env::var("BROKER_DEBUG").as_deref() {
-        Ok("trace") => LevelFilter::Trace,
-        Ok("debug") => LevelFilter::Debug,
-        Ok("info") => LevelFilter::Info,
-        Ok("warn") => LevelFilter::Warn,
-        Ok("error") => LevelFilter::Error,
-        _ => LevelFilter::Info, // default if unset or unknown
-    }
-}
-
-fn setup_logger() {
-    let level_filter = logging_level();
-
-    if let Err(e) = Dispatch::new()
-        .format(move |out, message, record| {
-            let file = record.file().unwrap_or("unknown_file");
-            let line = record.line().map_or(0, |l| l);
-
-            match level_filter {
-                LevelFilter::Off
-                | LevelFilter::Error
-                | LevelFilter::Warn
-                | LevelFilter::Debug
-                | LevelFilter::Trace
-                | LevelFilter::Info => {
-                    out.finish(format_args!(
-                        "[{}][{}]: {} <{}:{}>",
-                        Local::now().format("%b-%d-%Y %H:%M:%S.%f"),
-                        record.level(),
-                        message,
-                        file,
-                        line,
-                    ));
-                }
-            }
-        })
-        .level(level_filter)
-        .chain(std::io::stdout())
-        .apply()
-    {
-        log::error!("Logger initialization failed: {e}");
-    }
-}
-
 async fn register_device(
     curl: CurlActor<Collector>,
     server_ip: Ipv4Addr,
@@ -223,8 +176,8 @@ async fn register_device(
         .perform()
         .await?;
 
-    println!("{:#?}", response.headers());
-    println!("{response:#?}");
+    log::info!("{:#?}", response.headers());
+    log::info!("{response:#?}");
     Ok(())
 }
 
@@ -237,11 +190,11 @@ async fn scan_subnet(curl: CurlActor<Collector>) -> (Ipv4Addr, u16, Ipv4Addr) {
             .await
         {
             Ok((ip, port, device_ip)) => {
-                println!("Success! Found server at {}:{}", ip, port);
+                log::info!("Success! Found server at {}:{}", ip, port);
                 break (ip, port, device_ip);
             }
             Err(e) => {
-                eprintln!("Scan failed: {e}. Retrying in 5 second...");
+                log::error!("Scan failed: {e}. Retrying in 5 second...");
                 tokio::time::sleep(Duration::from_secs(5)).await;
             }
         }
@@ -250,7 +203,7 @@ async fn scan_subnet(curl: CurlActor<Collector>) -> (Ipv4Addr, u16, Ipv4Addr) {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    setup_logger();
+    logger::setup_logger();
     let web_handler = WebServerBuilder::new()
         .bind_addr(BIND_ADDR)
         .spawn()
