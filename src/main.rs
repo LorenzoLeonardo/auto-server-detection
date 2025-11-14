@@ -196,15 +196,14 @@ async fn main() -> Result<(), Error> {
         }
     });
 
-    tokio::signal::ctrl_c().await.unwrap();
+    let _ = tokio::signal::ctrl_c().await;
     log::info!("Ctrl+C received, starting shutdown...");
 
     let _ = shutdown_tx.send(());
 
     web_handler.stop();
-    web_handler.handle.await.unwrap();
 
-    main_task.await.unwrap();
+    let _ = tokio::join!(web_handler.handle, main_task);
 
     log::info!("Shutdown complete.");
     Ok(())
