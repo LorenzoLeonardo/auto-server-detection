@@ -5,7 +5,7 @@ use curl_http_client::Collector;
 use tokio::sync::mpsc;
 
 use crate::health_check;
-use crate::register_device;
+use crate::register;
 use crate::scanner::Error;
 use crate::scanner::SubnetScannerBuilder;
 
@@ -100,7 +100,7 @@ impl Manager {
         let curl = self.curl.clone();
 
         tokio::spawn(async move {
-            match register_device(curl, server_ip, port, device_ip).await {
+            match register::register_device(curl, server_ip, port, device_ip).await {
                 Ok(_) => {
                     let _ = tx.send(ManagerMsg::RegistrationSuccess).await;
                 }
