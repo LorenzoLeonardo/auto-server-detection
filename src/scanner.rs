@@ -170,13 +170,15 @@ impl SubnetScannerBuilder {
         let network = network_address(local_ip, netmask);
         let ips: Vec<Ipv4Addr> = ip_range(network, prefix_len).collect();
 
-        println!("Local IP detected: {}", local_ip);
-        println!("Netmask: {}", netmask);
-        println!("Prefix length: /{}", prefix_len);
-        println!("Network address: {}", network);
-        println!(
+        log::info!("Local IP detected: {}", local_ip);
+        log::info!("Netmask: {}", netmask);
+        log::info!("Prefix length: /{}", prefix_len);
+        log::info!("Network address: {}", network);
+        log::info!(
             "🔎 Scanning subnet {}/{} for HTTPS servers on port {}...",
-            network, prefix_len, builder.port
+            network,
+            prefix_len,
+            builder.port
         );
         let mut tasks = FuturesUnordered::new();
         let timeout = builder.timeout;
