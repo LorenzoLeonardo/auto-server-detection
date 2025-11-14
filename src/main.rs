@@ -1,4 +1,5 @@
 mod logger;
+mod manager;
 mod scanner;
 mod webserver;
 
@@ -10,10 +11,7 @@ use curl_http_client::{Collector, HttpClient};
 use http::{Method, Request, StatusCode, header};
 use serde::Serialize;
 
-use crate::{
-    scanner::{Error, SubnetScannerBuilder},
-    webserver::WebServerBuilder,
-};
+use crate::{manager::Manager, scanner::Error, webserver::WebServerBuilder};
 
 const BIND_ADDR: &str = "0.0.0.0:5248";
 
@@ -61,26 +59,6 @@ async fn register_device(
     }
 }
 
-async fn scan_subnet(curl: CurlActor<Collector>) -> (Ipv4Addr, u16, Ipv4Addr) {
-    loop {
-        match SubnetScannerBuilder::new()
-            .port(5247)
-            .timeout(Duration::from_secs(1))
-            .scan(curl.clone())
-            .await
-        {
-            Ok(found) => {
-                log::info!("Success! Found server at {}:{}", found.0, found.1);
-                return found;
-            }
-            Err(e) => {
-                log::error!("Scan failed: {e}. Retrying in 5 seconds...");
-                tokio::time::sleep(Duration::from_secs(5)).await;
-            }
-        }
-    }
-}
-
 async fn health_check(
     curl: &CurlActor<Collector>,
     server_ip: Ipv4Addr,
@@ -118,41 +96,6 @@ async fn health_check(
     }
 }
 
-async fn health_monitor_loop(
-    curl: CurlActor<Collector>,
-    server_ip: Ipv4Addr,
-    port: u16,
-    mut shutdown_signal: tokio::sync::watch::Receiver<()>,
-) -> bool {
-    loop {
-        tokio::select! {
-            _ = shutdown_signal.changed() => {
-                log::info!("Shutdown signal received, stopping health monitor.");
-                return true;
-            }
-
-            res = async {
-                match health_check(&curl, server_ip, port).await {
-                    Ok(_) => {
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                        Ok(())
-                    }
-                    Err(e) => {
-                        log::error!("Health check failed: {e}");
-                        tokio::time::sleep(Duration::from_secs(5)).await;
-                        Err(e)
-                    }
-                }
-            } => {
-                if let Err(e) = res {
-                    log::warn!("Health check error, exiting loop to rescan: {e}");
-                    return false;
-                }
-            }
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     logger::setup_logger();
@@ -165,45 +108,16 @@ async fn main() -> Result<(), Error> {
 
     let curl: CurlActor<Collector> = CurlActor::new();
 
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(());
-
-    let main_task = tokio::spawn(async move {
-        loop {
-            let (server_ip, port, device_ip) = scan_subnet(curl.clone()).await;
-
-            match register_device(curl.clone(), server_ip, port, device_ip).await {
-                Ok(_) => log::info!("Device registered successfully."),
-                Err(e) => {
-                    log::error!("Registration failed: {e}");
-                    continue; // retry scan
-                }
-            }
-
-            let shutdown_rx_clone = shutdown_rx.clone();
-            tokio::select! {
-                _ = shutdown_rx.changed() => {
-                    log::info!("Shutdown signal received, exiting main loop.");
-                    break;
-                }
-                res = health_monitor_loop(curl.clone(), server_ip, port, shutdown_rx_clone) => {
-                    if res {
-                        log::info!("Health monitor stopped due to shutdown.");
-                        break;
-                    }
-                    log::warn!("Health monitor ended: {res}. Rescanning subnet...");
-                }
-            }
+    let manager = Manager::new(curl);
+    tokio::select! {
+        _ = manager.run() => {}
+        _ = tokio::signal::ctrl_c() => {
+            log::info!("Ctrl+C received, shutting down...");
         }
-    });
-
-    let _ = tokio::signal::ctrl_c().await;
-    log::info!("Ctrl+C received, starting shutdown...");
-
-    let _ = shutdown_tx.send(());
+    }
 
     web_handler.stop();
-
-    let _ = tokio::join!(web_handler.handle, main_task);
+    let _ = web_handler.handle.await;
 
     log::info!("Shutdown complete.");
     Ok(())
