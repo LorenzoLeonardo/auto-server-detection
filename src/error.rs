@@ -8,6 +8,8 @@ pub enum Error {
     Http(http::Error),
     #[error("Serde error: {0}")]
     Serde(serde_json::Error),
+    #[error("Shutdown error: {0}")]
+    Shutdown(String),
     #[error("Other error: {0}")]
     Other(String),
 }

@@ -42,10 +42,16 @@ pub(crate) async fn register_device(
         .perform()
         .await?;
     if response.status() == StatusCode::OK {
+        log::info!(
+            "[register] Device {} registered successfully with server {}:{}",
+            device_ip,
+            server_ip,
+            port
+        );
         Ok(())
     } else {
         Err(Error::Other(format!(
-            "Device registration failed with status: {}",
+            "[register] Device registration failed with status: {}",
             response.status()
         )))
     }

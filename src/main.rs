@@ -8,35 +8,26 @@ mod webserver;
 
 use anyhow::Result;
 use async_curl::CurlActor;
-use curl_http_client::Collector;
 
-use crate::{error::Error, manager::Manager, webserver::WebServerBuilder};
+use crate::{manager::Manager, webserver::WebServerBuilder};
 
 const BIND_ADDR: &str = "0.0.0.0:5248";
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<()> {
     logger::setup_logger();
+    log::info!("[auto-server-detection] Started.");
 
-    let web_handler = WebServerBuilder::new()
-        .bind_addr(BIND_ADDR)
-        .spawn()
-        .await
-        .unwrap();
+    let web_handler = WebServerBuilder::new().bind_addr(BIND_ADDR).spawn().await?;
+    let manager = Manager::new(CurlActor::new()).run().await;
 
-    let curl: CurlActor<Collector> = CurlActor::new();
-
-    let manager = Manager::new(curl);
-    tokio::select! {
-        _ = manager.run() => {}
-        _ = tokio::signal::ctrl_c() => {
-            log::info!("Ctrl+C received, shutting down...");
-        }
-    }
+    let _ = tokio::signal::ctrl_c().await;
 
     web_handler.stop();
-    let _ = web_handler.handle.await;
+    manager.stop();
 
-    log::info!("Shutdown complete.");
+    let _ = tokio::join!(web_handler.handle, manager.handle);
+
+    log::info!("[auto-server-detection] Ended.");
     Ok(())
 }

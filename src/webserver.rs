@@ -10,7 +10,7 @@ use crate::BIND_ADDR;
 async fn spawn_http(bind_addr: &str, app: Router, mut stopper: WebServerStopper) {
     log::info!("[webserver] HTTP Webserver started.");
     let listener = tokio::net::TcpListener::bind(bind_addr).await.unwrap();
-    log::info!("SSE Push Server running using HTTP at http://{bind_addr}");
+    log::info!("[webserver] SSE Push Server running using HTTP at http://{bind_addr}");
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             let _ = stopper.shutdown_rx.changed().await;
@@ -45,7 +45,7 @@ impl WebServer {
         let stopper = self.stopper.clone();
 
         let fut = async move {
-            log::info!("No TLS certs provided — starting HTTP server");
+            log::info!("[webserver] No TLS certs provided — starting HTTP server");
             spawn_http(&bind_addr, app, stopper.clone()).await;
         };
         WebServerHandler {
@@ -94,7 +94,7 @@ impl WebServerBuilder {
 }
 
 async fn shutdown_handler(_request: Request<Body>) -> Json<serde_json::Value> {
-    log::info!("Shutdown request received.");
+    log::info!("[webserver] Shutdown request received.");
 
     // Attempt shutdown depending on OS
     let result = if cfg!(target_os = "windows") {
