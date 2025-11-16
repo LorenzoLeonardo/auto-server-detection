@@ -1,4 +1,4 @@
-use std::net::Ipv4Addr;
+use std::{net::Ipv4Addr, time::Duration};
 
 use async_curl::CurlActor;
 use curl_http_client::{Collector, HttpClient};
@@ -36,6 +36,8 @@ pub(crate) async fn register_device(
 
     let response = HttpClient::new(collector)
         .request(request)?
+        .connect_timeout(Duration::from_secs(5))?
+        .timeout(Duration::from_secs(10))?
         .ssl_verify_host(false)?
         .ssl_verify_peer(false)?
         .nonblocking(curl)

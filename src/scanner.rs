@@ -38,6 +38,7 @@ async fn check_http_server(
     let result = HttpClient::new(collector)
         .request(request)?
         .connect_timeout(timeout)?
+        .timeout(timeout)?
         .ssl_verify_host(false)?
         .ssl_verify_peer(false)?
         .nonblocking(actor)
