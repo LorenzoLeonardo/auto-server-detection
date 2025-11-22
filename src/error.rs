@@ -1,4 +1,4 @@
-use curl_http_client::Collector;
+use curl_http_client::{Collector, dep::http};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

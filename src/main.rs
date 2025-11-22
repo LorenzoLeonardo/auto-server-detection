@@ -7,7 +7,7 @@ mod scanner;
 mod webserver;
 
 use anyhow::Result;
-use async_curl::CurlActor;
+use curl_http_client::dep::async_curl::CurlActor;
 
 use crate::{manager::Manager, webserver::WebServerBuilder};
 

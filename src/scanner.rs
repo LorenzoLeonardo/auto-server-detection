@@ -1,10 +1,14 @@
 use std::net::Ipv4Addr;
 use std::time::Duration;
 
-use async_curl::CurlActor;
-use curl_http_client::*;
+use curl_http_client::{
+    Collector, HttpClient,
+    dep::{
+        async_curl::CurlActor,
+        http::{Method, Request},
+    },
+};
 use futures::stream::{FuturesUnordered, StreamExt};
-use http::{Method, Request};
 use if_addrs::{IfAddr, get_if_addrs};
 use local_ip_address::local_ip;
 use tokio::net::TcpStream;

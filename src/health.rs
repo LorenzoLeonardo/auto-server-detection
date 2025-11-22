@@ -1,9 +1,13 @@
 use std::{net::Ipv4Addr, time::Duration};
 
 use anyhow::Result;
-use async_curl::CurlActor;
-use curl_http_client::{Collector, HttpClient};
-use http::{Method, Request, StatusCode};
+use curl_http_client::{
+    Collector, HttpClient,
+    dep::{
+        async_curl::CurlActor,
+        http::{Method, Request, StatusCode},
+    },
+};
 
 use crate::error::Error;
 

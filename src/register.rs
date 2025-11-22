@@ -1,8 +1,12 @@
 use std::{net::Ipv4Addr, time::Duration};
 
-use async_curl::CurlActor;
-use curl_http_client::{Collector, HttpClient};
-use http::{Method, Request, StatusCode, header};
+use curl_http_client::{
+    Collector, HttpClient,
+    dep::{
+        async_curl::CurlActor,
+        http::{Method, Request, StatusCode, header},
+    },
+};
 use serde::Serialize;
 
 use crate::error::Error;

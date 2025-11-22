@@ -51,13 +51,11 @@ name = "auto-server-detection"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-curl",
  "axum",
  "chrono",
  "curl-http-client",
  "fern",
  "futures",
- "http",
  "if-addrs",
  "local-ip-address",
  "log",
@@ -65,7 +63,6 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
- "url",
 ]
 
 [[package]]
@@ -208,9 +205,9 @@ dependencies = [
 
 [[package]]
 name = "curl-http-client"
-version = "2.4.1"
+version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe91b104890516affc8db48f029caa97af0bd7be2e74a3000eabd90cd04a8069"
+checksum = "2017f660f749354e7828c7e86165b595eda5d0eff8b8664ef4fba83af172f255"
 dependencies = [
  "async-curl",
  "curl",

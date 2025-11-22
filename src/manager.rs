@@ -1,7 +1,6 @@
 use std::net::Ipv4Addr;
 
-use async_curl::CurlActor;
-use curl_http_client::Collector;
+use curl_http_client::{Collector, dep::async_curl::CurlActor};
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 
