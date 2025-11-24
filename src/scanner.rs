@@ -11,9 +11,7 @@ use curl_http_client::{
 use futures::stream::{FuturesUnordered, StreamExt};
 use if_addrs::{IfAddr, get_if_addrs};
 use local_ip_address::local_ip;
-use tokio::net::TcpStream;
 use tokio::sync::watch;
-use tokio::time;
 
 use crate::error::Error;
 
@@ -24,13 +22,6 @@ async fn check_http_server(
     timeout: Duration,
 ) -> Result<Option<Ipv4Addr>, Error> {
     let addr = format!("{}:{}", ip, port);
-
-    if time::timeout(timeout, TcpStream::connect(&addr))
-        .await
-        .is_err()
-    {
-        return Ok(None);
-    }
 
     let url = format!("https://{addr}");
     let collector = Collector::Ram(Vec::new());
