@@ -1,5 +1,6 @@
 use axum::http::StatusCode;
 use curl_http_client::{Collector, dep::http};
+use tokio::task::JoinError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -13,6 +14,8 @@ pub enum Error {
     Shutdown(String),
     #[error("Server error: {0}")]
     Server(StatusCode, String),
+    #[error("Tokio error: {0}")]
+    Tokio(String),
     #[error("Other error: {0}")]
     Other(String),
 }
@@ -32,5 +35,11 @@ impl From<http::Error> for Error {
 impl From<serde_json::Error> for Error {
     fn from(value: serde_json::Error) -> Self {
         Self::Serde(value)
+    }
+}
+
+impl From<JoinError> for Error {
+    fn from(value: JoinError) -> Self {
+        Self::Tokio(value.to_string())
     }
 }

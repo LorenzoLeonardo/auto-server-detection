@@ -182,24 +182,31 @@ impl SubnetScannerBuilder {
             }));
         }
 
-        while let Some(res) = if let Some(ref mut rx) = shutdown_rx {
-            tokio::select! {
-                _ = rx.changed() => {
-                    log::info!("[scanner] Scanner shutdown requested");
-                    return Err(Error::Shutdown("[scanner] Scanner shutdown".into()));
+        loop {
+            let next_task = if let Some(ref mut rx) = shutdown_rx {
+                tokio::select! {
+                    _ = rx.changed() => {
+                        log::info!("[scanner] Scanner shutdown requested");
+                        return Err(Error::Shutdown("[scanner] Scanner shutdown".into()));
+                    }
+                    res = tasks.next() => res,
                 }
-                res = tasks.next() => res,
-            }
-        } else {
-            tasks.next().await
-        } {
-            if let Ok(Ok(Some(ip))) = res {
+            } else {
+                tasks.next().await
+            };
+
+            let Some(res) = next_task else {
+                return Err(Error::Other(format!(
+                    "[scanner] ❌ No HTTP servers found in {network}/{prefix_len}."
+                )));
+            };
+
+            let found = res??;
+
+            if let Some(ip) = found {
                 log::info!("[scanner] 🎯 Active HTTP server detected at {}", ip);
                 return Ok((ip, port, local_ip));
             }
         }
-        Err(Error::Other(format!(
-            "[scanner] ❌ No HTTP servers found in {network}/{prefix_len}."
-        )))
     }
 }
