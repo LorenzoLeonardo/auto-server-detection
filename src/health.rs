@@ -39,10 +39,14 @@ pub(crate) async fn health_check(
 
     match resp {
         Ok(Ok(response)) if response.status() == StatusCode::OK => Ok(()),
-        Ok(Ok(response)) => Err(Error::Other(format!(
-            "Health check failed with status: {}",
-            response.status()
-        ))),
+        Ok(Ok(response)) => Err(Error::Server(
+            response.status(),
+            response
+                .status()
+                .canonical_reason()
+                .unwrap_or("Unknown Status")
+                .to_string(),
+        )),
         Ok(Err(e)) => Err(Error::Curl(e)),
         Err(_) => Err(Error::Other("Health check timed out".into())),
     }

@@ -1,3 +1,4 @@
+use axum::http::StatusCode;
 use curl_http_client::{Collector, dep::http};
 
 #[derive(thiserror::Error, Debug)]
@@ -10,6 +11,8 @@ pub enum Error {
     Serde(serde_json::Error),
     #[error("Shutdown error: {0}")]
     Shutdown(String),
+    #[error("Server error: {0}")]
+    Server(StatusCode, String),
     #[error("Other error: {0}")]
     Other(String),
 }

@@ -1,7 +1,6 @@
 use std::net::Ipv4Addr;
 
 use curl_http_client::{Collector, dep::async_curl::CurlActor};
-use tokio::sync::mpsc;
 use tokio::sync::watch;
 
 use crate::error::Error;
@@ -14,7 +13,6 @@ pub enum ManagerMsg {
     ScanResult(Ipv4Addr, u16, Ipv4Addr),
     RegistrationSuccess,
     RegistrationFailed(Error),
-    ServerAlive,
     ServerDead,
     Shutdown,
 }
@@ -31,43 +29,52 @@ impl ManagerHandler {
 }
 
 pub struct Manager {
-    tx: mpsc::Sender<ManagerMsg>,
-    rx: mpsc::Receiver<ManagerMsg>,
     curl: CurlActor<Collector>,
 }
 
 impl Manager {
     pub fn new(curl: CurlActor<Collector>) -> Self {
-        let (tx, rx) = mpsc::channel(32);
-        Self { tx, rx, curl }
+        Self { curl }
     }
 
-    pub async fn run(mut self) -> ManagerHandler {
+    pub async fn run(self) -> ManagerHandler {
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
         let handle = tokio::spawn(async move {
             log::info!("[manager] Manager started");
             loop {
-                self.spawn_scan_task(Some(shutdown_rx.clone())).await;
+                let (server_ip, port, device_ip) =
+                    match self.spawn_scan_task(Some(shutdown_rx.clone())).await {
+                        ManagerMsg::ScanResult(server_ip, port, device_ip) => {
+                            (server_ip, port, device_ip)
+                        }
+                        ManagerMsg::Shutdown => {
+                            break;
+                        }
+                        _ => unimplemented!("[manager] scan task has only two return values."),
+                    };
 
-                let (server_ip, port, device_ip) = match self.wait_for_scan().await {
-                    Some(v) => v,
-                    None => break,
-                };
-
-                self.spawn_register_task(server_ip, port, device_ip).await;
-
-                if !self.wait_for_registration().await {
-                    continue;
+                match self.spawn_register_task(server_ip, port, device_ip).await {
+                    ManagerMsg::RegistrationSuccess => {}
+                    ManagerMsg::RegistrationFailed(error) => {
+                        log::error!("[manager] ManagerMsg::RegistrationFailed: {error}");
+                        continue;
+                    }
+                    _ => unimplemented!("[manager] register task has only two return values."),
                 }
 
-                self.spawn_health_monitor(server_ip, port, Some(shutdown_rx.clone()))
-                    .await;
-
-                match self.wait_for_health_events().await {
-                    HealthEvent::Shutdown => break,
-                    HealthEvent::ServerDead => {
-                        log::warn!("[manager] Server died → restarting scan & registration");
+                match self
+                    .spawn_health_monitor(server_ip, port, Some(shutdown_rx.clone()))
+                    .await
+                {
+                    ManagerMsg::ServerDead => {
+                        log::info!("[manager] Retry scan. . .");
                         continue;
+                    }
+                    ManagerMsg::Shutdown => {
+                        break;
+                    }
+                    _ => {
+                        unimplemented!("[manager] health monitor task has only two return values.")
                     }
                 }
             }
@@ -81,80 +88,60 @@ impl Manager {
 
     // ----------------------------------------------------------------------
 
-    async fn spawn_scan_task(&self, shutdown_rx: Option<watch::Receiver<bool>>) {
-        let tx = self.tx.clone();
+    async fn spawn_scan_task(&self, shutdown_rx: Option<watch::Receiver<bool>>) -> ManagerMsg {
         let curl = self.curl.clone();
-        let shutdown_rx = shutdown_rx.clone();
+
         log::info!("[manager] Starting subnet scan task...");
         loop {
-            match SubnetScannerBuilder::new()
-                .port(5247)
-                .timeout(std::time::Duration::from_secs(1))
-                .scan(curl.clone(), shutdown_rx.clone())
-                .await
-            {
-                Ok((sip, port, dip)) => {
-                    let _ = tx.send(ManagerMsg::ScanResult(sip, port, dip)).await;
-                    break;
-                }
-                Err(e) => {
-                    if let Error::Shutdown(e) = e {
-                        log::info!("[manager] {e}");
-                        let _ = tx.send(ManagerMsg::Shutdown).await;
-                        break;
+            tokio::select! {
+                // 🔹 Shutdown signal received → exit immediately
+                _ = async {
+                    if let Some(mut rx) = shutdown_rx.clone() {
+                        // Wait until it changes to true
+                        rx.changed().await.ok();
                     }
-                    log::error!("[manager] Scan failed: {e}. Retrying in 5 seconds...");
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                } => {
+                    log::info!("[manager] Received shutdown during scan.");
+                    return ManagerMsg::Shutdown;
+                }
+
+                // 🔹 Run the scanner
+                res = SubnetScannerBuilder::new()
+                    .port(5247)
+                    .timeout(std::time::Duration::from_secs(1))
+                    .scan(curl.clone(), shutdown_rx.clone()) => {
+
+                    match res {
+                        Ok((sip, port, dip)) => {
+                            return ManagerMsg::ScanResult(sip, port, dip);
+                        }
+                        Err(e) => {
+                            if let Error::Shutdown(e) = e {
+                                log::info!("[manager] {e}");
+                                return ManagerMsg::Shutdown;
+                            }
+                            log::error!("[manager] Scan failed: {e}. Retrying in 5 seconds...");
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        }
+                    }
                 }
             }
         }
     }
-
-    async fn wait_for_scan(&mut self) -> Option<(Ipv4Addr, u16, Ipv4Addr)> {
-        while let Some(msg) = self.rx.recv().await {
-            if let ManagerMsg::ScanResult(s, p, d) = msg {
-                return Some((s, p, d));
-            }
-
-            if let ManagerMsg::Shutdown = msg {
-                log::info!("[manager] Manager shutdown requested");
-                return None;
-            }
-        }
-        None
-    }
-
     // ----------------------------------------------------------------------
 
-    async fn spawn_register_task(&self, server_ip: Ipv4Addr, port: u16, device_ip: Ipv4Addr) {
-        let tx = self.tx.clone();
+    async fn spawn_register_task(
+        &self,
+        server_ip: Ipv4Addr,
+        port: u16,
+        device_ip: Ipv4Addr,
+    ) -> ManagerMsg {
         let curl = self.curl.clone();
 
         match register::register_device(curl, server_ip, port, device_ip).await {
-            Ok(_) => {
-                let _ = tx.send(ManagerMsg::RegistrationSuccess).await;
-            }
-            Err(e) => {
-                let _ = tx.send(ManagerMsg::RegistrationFailed(e)).await;
-            }
+            Ok(_) => ManagerMsg::RegistrationSuccess,
+            Err(e) => ManagerMsg::RegistrationFailed(e),
         }
-    }
-
-    async fn wait_for_registration(&mut self) -> bool {
-        while let Some(msg) = self.rx.recv().await {
-            match msg {
-                ManagerMsg::RegistrationSuccess => {
-                    log::info!("[manager] Registration succeeded");
-                    return true;
-                }
-                ManagerMsg::RegistrationFailed(e) => {
-                    log::error!("[manager] Registration failed: {e}");
-                    return false;
-                }
-                _ => continue,
-            }
-        }
-        false
     }
 
     // ----------------------------------------------------------------------
@@ -164,8 +151,7 @@ impl Manager {
         server_ip: Ipv4Addr,
         port: u16,
         shutdown_rx: Option<watch::Receiver<bool>>,
-    ) {
-        let tx = self.tx.clone();
+    ) -> ManagerMsg {
         let curl = self.curl.clone();
 
         loop {
@@ -173,47 +159,28 @@ impl Manager {
                 // 🔥 Shutdown request received: stop immediately
                 _ = async {
                     if let Some(mut rx) = shutdown_rx.clone() {
+                        // Wait until it changes to true
                         rx.changed().await.ok();
                     }
-                }, if shutdown_rx.is_some() => {
-                    log::info!("Health monitor received shutdown signal");
-                    let _ = tx.send(ManagerMsg::Shutdown).await;
-                    return;
+                } => {
+                    log::info!("[manager] Received shutdown during health monitor.");
+                    return ManagerMsg::Shutdown;
                 }
 
                 // 🩺 Health check branch
                 res = health::health_check(&curl, server_ip, port) => {
                     match res {
                         Ok(_) => {
-                            let _ = tx.send(ManagerMsg::ServerAlive).await;
+                            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                            continue;
                         }
                         Err(e) => {
                             log::warn!("Health check failed: {e}");
-                            let _ = tx.send(ManagerMsg::ServerDead).await;
-                            return; // stop monitor on failure
+                            return ManagerMsg::ServerDead;
                         }
                     }
-
-                    // Delay for next loop
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
             }
         }
     }
-
-    async fn wait_for_health_events(&mut self) -> HealthEvent {
-        while let Some(msg) = self.rx.recv().await {
-            match msg {
-                ManagerMsg::ServerDead => return HealthEvent::ServerDead,
-                ManagerMsg::Shutdown => break,
-                _ => continue,
-            }
-        }
-        HealthEvent::Shutdown
-    }
-}
-
-pub enum HealthEvent {
-    ServerDead,
-    Shutdown,
 }

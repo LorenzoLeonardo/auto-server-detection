@@ -56,9 +56,13 @@ pub(crate) async fn register_device(
         );
         Ok(())
     } else {
-        Err(Error::Other(format!(
-            "[register] Device registration failed with status: {}",
-            response.status()
-        )))
+        Err(Error::Server(
+            response.status(),
+            response
+                .status()
+                .canonical_reason()
+                .unwrap_or("Unknown Status")
+                .to_string(),
+        ))
     }
 }
